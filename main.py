@@ -1,7 +1,10 @@
 import tkinter as tk
 from tkinter import ttk
+import tkinter.messagebox
 from PIL import Image, ImageDraw, ImageFont
+
 import csv
+import json
 import os
 import sys
 
@@ -9,6 +12,8 @@ import sys
 if sys.platform.startswith('win'):
     import win32clipboard
     import io
+
+SUB_PATH = "created_files"
 
 class EvaluationApp:
     def __init__(self, master):
@@ -45,6 +50,7 @@ class EvaluationApp:
         self.notebook.add(self.report_frame, text='Генерация отчета')
 
         self.create_info_tab()
+        self.load_info_parameters()  # Load saved parameters
         self.create_criteria_tab()
         self.create_penalty_tab()
         self.create_report_tab()
@@ -53,6 +59,42 @@ class EvaluationApp:
         self.status_var = tk.StringVar()
         self.status_bar = tk.Label(master, textvariable=self.status_var, bd=1, relief='sunken', anchor='w')
         self.status_bar.pack(side='bottom', fill='x')
+        
+        self.master.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def on_closing(self):
+        self.save_info_parameters()
+        self.master.destroy()
+
+    def save_info_parameters(self):
+        data = {
+            'hw_name': self.hw_name_entry.get(),
+            'variant_count': self.variant_count_entry.get(),
+            'group': self.group_var.get(),
+            'student': self.student_var.get(),
+            'variant': self.variant_entry.get(),
+            'on_time': self.on_time.get()
+        }
+        with open('info_parameters.json', 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False)
+
+    def load_info_parameters(self):
+        if os.path.exists('info_parameters.json'):
+            with open('info_parameters.json', 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                self.hw_name_entry.delete(0, tk.END)
+                self.hw_name_entry.insert(0, data.get('hw_name', ''))
+                self.variant_count_entry.delete(0, tk.END)
+                self.variant_count_entry.insert(0, data.get('variant_count', '30'))
+                self.group_var.set(data.get('group', ''))
+                # Update the student list based on the loaded group
+                self.update_student_list(None)
+                self.student_var.set(data.get('student', ''))
+                # Update student info based on the loaded student
+                self.update_student_info(None)
+                self.variant_entry.delete(0, tk.END)
+                self.variant_entry.insert(0, data.get('variant', ''))
+                self.on_time.set(data.get('on_time', True))
 
     def load_student_data(self):
         self.student_data = []
@@ -455,6 +497,46 @@ class EvaluationApp:
         self.generate_button.pack(pady=5)
         self.copy_button = ttk.Button(self.report_frame, text="Скопировать картинку в буфер обмена", command=self.copy_to_clipboard)
         self.copy_button.pack(pady=5)
+        # Добавляем кнопку очистки полей
+        self.reset_button = ttk.Button(self.report_frame, text="Очистить все поля", command=self.reset_fields)
+        self.reset_button.pack(pady=5)
+
+    def reset_fields(self):
+        # Сбрасываем поля на вкладке "Информация о студенте"
+        self.variant_count_entry.delete(0, tk.END)
+        self.variant_count_entry.insert(0, "30")
+        self.on_time.set(True)
+
+        # Сбрасываем критерии оценки
+        for section, vars_list in self.criteria_scores.items():
+            if section.startswith("1."):
+                var = vars_list[0][0]
+                var.set(2)
+                for var_cb in self.minor_discrepancies_vars:
+                    var_cb.set(False)
+                for var_cb in self.major_discrepancies_vars:
+                    var_cb.set(False)
+            elif section.startswith("2."):
+                var = vars_list[0][0]
+                var.set(4)
+                for var_cb in self.line_errors_vars:
+                    var_cb.set(False)
+            elif section.startswith("3."):
+                vars_list[0][0].set(True)
+                for var_cb in self.obvodka_errors_vars:
+                    var_cb.set(False)
+            elif section.startswith("4."):
+                vars_list[0][0].set(True)
+                for var_cb in self.dimension_errors_vars:
+                    var_cb.set(False)
+
+        # Сбрасываем дополнительные штрафы
+        for var, _ in self.penalty_vars:
+            var.set(False)
+        self.delay_entry.delete(0, tk.END)
+        self.delay_entry.insert(0, "0")
+
+        self.status_var.set("Все поля сброшены к значениям по умолчанию.")
 
     def generate_report(self, save_to_file=True):
         # Проверка заполнения обязательных полей
@@ -635,6 +717,9 @@ class EvaluationApp:
         if not hw_name:
             self.status_var.set("Пожалуйста, введите название домашней работы.")
             return
+        if not os.path.exists(SUB_PATH):
+            os.makedirs(SUB_PATH)
+        hw_name = os.path.join(SUB_PATH, hw_name)
         if not os.path.exists(hw_name):
             os.makedirs(hw_name)
         # Сохранение изображения с именем студента
