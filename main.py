@@ -50,8 +50,12 @@ class EvaluationApp:
         self.report_frame = ttk.Frame(self.notebook)
         self.notebook.add(self.report_frame, text="Генерация отчета")
 
+        self.section_max_scores = (
+            {}
+        )  # Словарь для хранения максимальных баллов по критериям
+
         self.create_info_tab()
-        self.load_info_parameters()  # Load saved parameters
+        self.load_info_parameters()  # Загрузка сохраненных параметров
         self.create_criteria_tab()
         self.create_penalty_tab()
         self.create_report_tab()
@@ -90,10 +94,10 @@ class EvaluationApp:
                 self.variant_count_entry.delete(0, tk.END)
                 self.variant_count_entry.insert(0, data.get("variant_count", "30"))
                 self.group_var.set(data.get("group", ""))
-                # Update the student list based on the loaded group
+                # Обновление списка студентов на основе загруженной группы
                 self.update_student_list(None)
                 self.student_var.set(data.get("student", ""))
-                # Update student info based on the loaded student
+                # Обновление информации о студенте на основе загруженного имени
                 self.update_student_info(None)
                 self.variant_entry.delete(0, tk.END)
                 self.variant_entry.insert(0, data.get("variant", ""))
@@ -229,8 +233,10 @@ class EvaluationApp:
         if key in self.student_variants:
             variant_number = self.student_variants[key]
         else:
-            if student_number > 29:
-                variant_number = student_number - 29
+            if student_number > variant_count:
+                variant_number = student_number % variant_count
+                if variant_number == 0:
+                    variant_number = variant_count
             else:
                 variant_number = student_number
         self.variant_entry.configure(state="normal")
@@ -289,279 +295,8 @@ class EvaluationApp:
             "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
 
-        # Создаем критерии
-        self.create_criteria()
-
-    def create_criteria(self):
-        # Критерий 1
-        self.create_section1()
-
-        # Критерий 2
-        self.create_section2()
-
-        # Критерий 3
-        self.create_section3()
-
-        # Критерий 4
-        self.create_section4()
-
-    def create_section1(self):
-        section_title = "1. Сходство итогового эскиза с изображением (0–2 балла)"
-        section_frame = ttk.Labelframe(self.criteria_inner_frame, text=section_title)
-        section_frame.pack(fill="x", padx=10, pady=5)
-
-        var = tk.IntVar(value=2)
-        vars_list = []
-
-        def on_radiobutton_one_selected():
-            for cb in self.major_discrepancies_vars:
-                cb.set(False)
-
-        def on_radiobutton_two_selected():
-            for cb in self.minor_discrepancies_vars:
-                cb.set(False)
-
-        def on_radiobutton_selected():
-            on_radiobutton_one_selected()
-            on_radiobutton_two_selected()
-
-        def on_checkbox_one_selected():
-            var.set(1)
-            on_radiobutton_one_selected()
-
-        def on_checkbox_two_selected():
-            var.set(0)
-            on_radiobutton_two_selected()
-
-        # 2 балла
-        rb_full_match = ttk.Radiobutton(
-            section_frame,
-            text="2 балла — Полное соответствие изображению.",
-            variable=var,
-            value=2,
-            command=on_radiobutton_selected,
-        )
-        rb_full_match.pack(anchor="w")
-        vars_list.append((var, 2))
-
-        # -1 балл
-        rb_minor_discrepancies = ttk.Radiobutton(
-            section_frame,
-            text="-1 балл — Небольшие несовпадения:",
-            variable=var,
-            value=1,
-            command=on_radiobutton_one_selected,
-        )
-        rb_minor_discrepancies.pack(anchor="w")
-        vars_list.append((var, 1))
-
-        # Подпункты для -1 балла
-        self.minor_discrepancies_vars = []
-        self.minor_discrepancies_texts = []
-
-        sub_frame_minor = ttk.Frame(section_frame)
-        sub_frame_minor.pack(anchor="w", padx=20)
-
-        for text in [
-            "Несовпадение одного из размеров.",
-            "Небольшие отклонения в форме.",
-            "Лишние элементы на эскизе.",
-        ]:
-            var_cb = tk.BooleanVar()
-            cb = ttk.Checkbutton(
-                sub_frame_minor,
-                text=text,
-                variable=var_cb,
-                command=on_checkbox_one_selected,
-            )
-            cb.pack(anchor="w")
-            self.minor_discrepancies_vars.append(var_cb)
-            self.minor_discrepancies_texts.append(text)
-
-        # -2 балла
-        rb_major_discrepancies = ttk.Radiobutton(
-            section_frame,
-            text="-2 балла — Существенные расхождения:",
-            variable=var,
-            value=0,
-            command=on_radiobutton_two_selected,
-        )
-        rb_major_discrepancies.pack(anchor="w")
-        vars_list.append((var, 0))
-
-        # Подпункты для -2 балла
-        self.major_discrepancies_vars = []
-        self.major_discrepancies_texts = []
-
-        sub_frame_major = ttk.Frame(section_frame)
-        sub_frame_major.pack(anchor="w", padx=20)
-
-        for text in [
-            "Отсутствие части эскиза.",
-            "Эскиз только отдаленно напоминает вариант.",
-            "Половина эскиза отсутствует.",
-        ]:
-            var_cb = tk.BooleanVar()
-            cb = ttk.Checkbutton(
-                sub_frame_major,
-                text=text,
-                variable=var_cb,
-                command=on_checkbox_two_selected,
-            )
-            cb.pack(anchor="w")
-            self.major_discrepancies_vars.append(var_cb)
-            self.major_discrepancies_texts.append(text)
-
-        self.criteria_scores[section_title] = vars_list
-
-    def create_section2(self):
-        section_title = "2. Правильность использования линий построения (0–4 балла)"
-        section_frame = ttk.Labelframe(self.criteria_inner_frame, text=section_title)
-        section_frame.pack(fill="x", padx=10, pady=5)
-
-        var = tk.IntVar(value=4)
-        vars_list = []
-
-        def on_radiobutton_selected():
-            for cb in self.line_errors_vars:
-                cb.set(False)
-
-        # 4 балла
-        rb_all_correct = ttk.Radiobutton(
-            section_frame,
-            text="4 балла — Все необходимые линии построения присутствуют и правильно используются.",
-            variable=var,
-            value=4,
-            command=on_radiobutton_selected,
-        )
-        rb_all_correct.pack(anchor="w")
-        vars_list.append((var, 4))
-
-        # -1 балл за каждую ошибку
-        rb_errors = ttk.Radiobutton(
-            section_frame,
-            text="-1 балл за каждую из следующих ошибок:",
-            variable=var,
-            value=-1,
-        )
-        rb_errors.pack(anchor="w")
-        vars_list.append((var, -1))
-
-        # Список ошибок
-        self.line_errors_vars = []
-        self.line_errors_texts = []
-
-        sub_frame_errors = ttk.Frame(section_frame)
-        sub_frame_errors.pack(anchor="w", padx=20)
-
-        for text in [
-            "Отсутствуют осевые линии.",
-            "Отсутствуют необходимые линии построения.",
-            "Линии построения не влияют на эскиз.",
-            "Избыточное количество линий построения.",
-            "Неиспользуемые линии построения.",
-            "Линии построения пересекаются некорректно.",
-        ]:
-            var_cb = tk.BooleanVar()
-            cb = ttk.Checkbutton(
-                sub_frame_errors,
-                text=text,
-                variable=var_cb,
-                command=lambda: var.set(-1),
-            )
-            cb.pack(anchor="w")
-            self.line_errors_vars.append(var_cb)
-            self.line_errors_texts.append(text)
-
-        # -4 балла
-        rb_no_lines = ttk.Radiobutton(
-            section_frame,
-            text="-4 балла — Практически полное отсутствие линий построения.",
-            variable=var,
-            value=0,
-            command=on_radiobutton_selected,
-        )
-        rb_no_lines.pack(anchor="w")
-        vars_list.append((var, 0))
-
-        self.criteria_scores[section_title] = vars_list
-
-    def create_section3(self):
-        section_title = (
-            "3. Правильность использования линий изображения (обводки) (0–2 балла)"
-        )
-        section_frame = ttk.Labelframe(self.criteria_inner_frame, text=section_title)
-        section_frame.pack(fill="x", padx=10, pady=5)
-
-        vars_list = []
-
-        # 2 балла
-        var_correct_lines = tk.BooleanVar(value=True)
-        cb_correct_lines = ttk.Checkbutton(
-            section_frame,
-            text="2 балла — Линии обводки использованы правильно.",
-            variable=var_correct_lines,
-        )
-        cb_correct_lines.pack(anchor="w")
-        vars_list.append((var_correct_lines, 2))
-
-        # -1 балл за каждую ошибку
-        self.obvodka_errors_vars = []
-        self.obvodka_errors_texts = []
-
-        for text in [
-            "Лишние линии обводки (-1 балл).",
-            "Отсутствуют необходимые линии обводки (-1 балл).",
-            "Неправильное применение типов линий (-1 балл).",
-            "Линии обводки пересекаются некорректно (-1 балл).",
-            "Неправильное положение линий обводки (-1 балл).",
-        ]:
-            var_cb = tk.BooleanVar()
-            cb = ttk.Checkbutton(section_frame, text=text, variable=var_cb)
-            cb.pack(anchor="w")
-            self.obvodka_errors_vars.append(var_cb)
-            self.obvodka_errors_texts.append(text)
-            vars_list.append((var_cb, -1))
-
-        self.criteria_scores[section_title] = vars_list
-
-    def create_section4(self):
-        section_title = "4. Правильность использования размеров (0–2 балла)"
-        section_frame = ttk.Labelframe(self.criteria_inner_frame, text=section_title)
-        section_frame.pack(fill="x", padx=10, pady=5)
-
-        vars_list = []
-
-        # 2 балла
-        var_correct_dimensions = tk.BooleanVar(value=True)
-        cb_correct_dimensions = ttk.Checkbutton(
-            section_frame,
-            text="2 балла — Все размеры установлены корректно и соответствуют заданию.",
-            variable=var_correct_dimensions,
-        )
-        cb_correct_dimensions.pack(anchor="w")
-        vars_list.append((var_correct_dimensions, 2))
-
-        # -1 балл за каждую ошибку
-        self.dimension_errors_vars = []
-        self.dimension_errors_texts = []
-
-        for text in [
-            "Отсутствуют некоторые размеры (-1 балл).",
-            "Размеры установлены некорректно (-1 балл).",
-            "Размеры пересекаются (-1 балл).",
-            "Неправильное отмеривание углов (-1 балл).",
-            "Размеры выходят за пределы листа (-1 балл).",
-            "Использованы константные значения вместо размеров (-1 балл).",
-        ]:
-            var_cb = tk.BooleanVar()
-            cb = ttk.Checkbutton(section_frame, text=text, variable=var_cb)
-            cb.pack(anchor="w")
-            self.dimension_errors_vars.append(var_cb)
-            self.dimension_errors_texts.append(text)
-            vars_list.append((var_cb, -1))
-
-        self.criteria_scores[section_title] = vars_list
+        # Загружаем критерии из JSON-файла
+        self.load_criteria_from_json()
 
     def create_penalty_tab(self):
         canvas = tk.Canvas(self.penalty_frame)
@@ -592,41 +327,141 @@ class EvaluationApp:
             "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
 
-        # Создаем штрафы
-        self.create_penalties()
+        # Создаем штрафы из JSON-файла
+        self.create_penalties_from_json()
 
-    def create_penalties(self):
+    def load_criteria_from_json(self):
+        try:
+            with open("criteria.json", "r", encoding="utf-8") as f:
+                self.criteria_data = json.load(f)
+            self.create_criteria()
+        except Exception as e:
+            tk.messagebox.showerror("Ошибка", f"Не удалось загрузить критерии: {e}")
+
+    def checkbox_callback(self, checkbox_var, score, main_var):
+        if checkbox_var.get():
+            main_var.set(score)
+        else:
+            # Если все чекбоксы сняты, можно вернуть значение радиокнопки к какому-то состоянию по умолчанию
+            pass
+
+    def radiobutton_callback(self, current_option, var_main, options_list):
+        # Сбрасываем все чекбоксы под всеми опциями
+        for opt in options_list:
+            if "suboption_vars" in opt:
+                for sub_var in opt["suboption_vars"]:
+                    sub_var.set(False)
+        # Устанавливаем значение радиокнопки
+        var_main.set(current_option.get("score", 0))
+
+    def create_criteria(self):
+        for section in self.criteria_data.get("sections", []):
+            title = section.get("title", "")
+            section_type = section.get("type", "")
+            max_score = section.get("max_score", 0)
+            self.section_max_scores[title] = max_score
+            options = section.get("options", [])
+
+            section_frame = ttk.Labelframe(self.criteria_inner_frame, text=title)
+            section_frame.pack(fill="x", padx=10, pady=5)
+
+            vars_list = []
+
+            if section_type == "radio_with_subchecks":
+                var = tk.IntVar(value=options[0].get("score", 0))
+
+                for option in options:
+                    score = option.get("score", 0)
+                    text = option.get("text", "")
+                    suboptions = option.get("suboptions", [])
+
+                    rb = ttk.Radiobutton(
+                        section_frame,
+                        text=text,
+                        variable=var,
+                        value=score,
+                        command=lambda opt=option, var_main=var, opts=options: self.radiobutton_callback(
+                            opt, var_main, opts
+                        ),
+                    )
+                    rb.pack(anchor="w")
+                    vars_list.append((var, score))
+
+                    if suboptions:
+                        sub_frame = ttk.Frame(section_frame)
+                        sub_frame.pack(anchor="w", padx=20)
+
+                        option["suboption_vars"] = []
+                        for subtext in suboptions:
+                            var_cb = tk.BooleanVar()
+                            cb = ttk.Checkbutton(
+                                sub_frame,
+                                text=subtext,
+                                variable=var_cb,
+                                command=lambda v_cb=var_cb, s=score, var_main=var: self.checkbox_callback(
+                                    v_cb, s, var_main
+                                ),
+                            )
+                            cb.pack(anchor="w")
+                            option["suboption_vars"].append(var_cb)
+                            vars_list.append(
+                                (var_cb, 0)
+                            )  # Значение 0, т.к. учитываем ниже
+
+                # Сохраняем ссылки для дальнейшего использования
+                self.criteria_scores[title] = {
+                    "type": section_type,
+                    "vars": vars_list,
+                    "options": options,
+                    "main_var": var,
+                }
+
+            elif section_type == "checkbox":
+                vars_list = []
+                for option in options:
+                    score = option.get("score", 0)
+                    text = option.get("text", "")
+                    var_cb = tk.BooleanVar(value=score > 0)
+                    cb = ttk.Checkbutton(
+                        section_frame,
+                        text=text,
+                        variable=var_cb,
+                        command=lambda: None,
+                    )
+                    cb.pack(anchor="w")
+                    vars_list.append((var_cb, score))
+
+                self.criteria_scores[title] = {
+                    "type": section_type,
+                    "vars": vars_list,
+                }
+
+    def create_penalties_from_json(self):
         tk.Label(self.penalty_inner_frame, text="Дополнительные штрафы:").pack(
             anchor="w", pady=5
         )
 
-        self.penalties = [
-            ("Неправильное название архива (-3 балла)", -3),
-            ("Чертеж выходит за границы листа (-1 балл)", -1),
-            ("Чертеж переопределен (избыточные зависимости) (-1 балл)", -1),
-            (
-                "Неиспользован необходимый массив или использован некорректно (-1 балл)",
-                -1,
-            ),
-            ("Не указаны осевые линии при необходимости (-1 балл)", -1),
-            ("Чертеж выполнен не в той области рабочего пространства (-1 балл)", -1),
-            ("Обнаружен плагиат (оценка обнуляется)", 0),
-        ]
         self.penalty_vars = []
         self.penalty_texts = []
-        for text, value in self.penalties:
+
+        penalties = self.criteria_data.get("penalties", [])
+        for penalty in penalties:
+            text = penalty.get("text", "")
+            score = penalty.get("score", 0)
             var = tk.BooleanVar(value=False)
             cb = ttk.Checkbutton(self.penalty_inner_frame, text=text, variable=var)
             cb.pack(anchor="w")
-            self.penalty_vars.append((var, value))
+            self.penalty_vars.append((var, score))
             self.penalty_texts.append(text)
 
         # Просрочка
+        delay_info = self.criteria_data.get("delays", {})
+        delay_text = delay_info.get("text", "")
+        self.delay_penalty_per_day = delay_info.get("score_per_day", -2)
+
         delay_frame = ttk.Frame(self.penalty_inner_frame)
         delay_frame.pack(fill="x", pady=10)
-        tk.Label(
-            delay_frame, text="Дней просрочки сдачи задания (-2 балла за каждый день):"
-        ).pack(side="left")
+        tk.Label(delay_frame, text=delay_text).pack(side="left")
         self.delay_entry = tk.Entry(delay_frame, width=5)
         self.delay_entry.pack(side="left", padx=5)
         self.delay_entry.insert(0, "0")
@@ -660,27 +495,18 @@ class EvaluationApp:
         self.on_time.set(True)
 
         # Сбрасываем критерии оценки
-        for section, vars_list in self.criteria_scores.items():
-            if section.startswith("1."):
-                var = vars_list[0][0]
-                var.set(2)
-                for var_cb in self.minor_discrepancies_vars:
-                    var_cb.set(False)
-                for var_cb in self.major_discrepancies_vars:
-                    var_cb.set(False)
-            elif section.startswith("2."):
-                var = vars_list[0][0]
-                var.set(4)
-                for var_cb in self.line_errors_vars:
-                    var_cb.set(False)
-            elif section.startswith("3."):
-                vars_list[0][0].set(True)
-                for var_cb in self.obvodka_errors_vars:
-                    var_cb.set(False)
-            elif section.startswith("4."):
-                vars_list[0][0].set(True)
-                for var_cb in self.dimension_errors_vars:
-                    var_cb.set(False)
+        for section, data in self.criteria_scores.items():
+            if data["type"] == "radio_with_subchecks":
+                data["main_var"].set(
+                    data["vars"][0][1]
+                )  # Устанавливаем на первый вариант
+                for option in data["options"]:
+                    if "suboption_vars" in option:
+                        for var_cb in option["suboption_vars"]:
+                            var_cb.set(False)
+            elif data["type"] == "checkbox":
+                for var_cb, score in data["vars"]:
+                    var_cb.set(score > 0)
 
         # Сбрасываем дополнительные штрафы
         for var, _ in self.penalty_vars:
@@ -700,73 +526,55 @@ class EvaluationApp:
         total_score = 0
         section_scores = {}
         section_comments = {}
-        for section, vars_list in self.criteria_scores.items():
-            score = 0
+
+        for section, data in self.criteria_scores.items():
+            max_score = self.section_max_scores.get(section, 0)
+            score = max_score  # Начинаем с максимального балла
             comments = []
 
-            if section.startswith("1."):
-                var = vars_list[0][0]
-                score = var.get()
+            if data["type"] == "radio_with_subchecks":
+                main_var = data["main_var"]
+                main_score = main_var.get()
+                selected_option = None
 
-                # Учитываем подвыборы для -1 и -2 баллов
-                if score == 1:
-                    # Если выбрано -1 балл, вычитаем 1 балл
-                    score = 2 - 1
-                    # Добавляем комментарии из выбранных подпунктов
-                    for var_cb, text in zip(
-                        self.minor_discrepancies_vars, self.minor_discrepancies_texts
-                    ):
-                        if var_cb.get():
-                            comments.append(text)
-                elif score == 0:
-                    # Если выбрано -2 балла, вычитаем 2 балла
-                    score = 2 - 2
-                    # Добавляем комментарии из выбранных подпунктов
-                    for var_cb, text in zip(
-                        self.major_discrepancies_vars, self.major_discrepancies_texts
-                    ):
-                        if var_cb.get():
-                            comments.append(text)
+                # Находим выбранную опцию
+                for option in data["options"]:
+                    if option.get("score") == main_score:
+                        selected_option = option
+                        break
 
-            elif section.startswith("2."):
-                var = vars_list[0][0]
-                radio_value = var.get()
-                if radio_value == 4:
-                    score = 4
-                elif radio_value == -1:
-                    # Вычитаем по -1 баллу за каждую отмеченную ошибку
-                    errors = sum(1 for var_cb in self.line_errors_vars if var_cb.get())
-                    score = 4 - errors
-                    # Добавляем комментарии из выбранных ошибок
-                    for var_cb, text in zip(
-                        self.line_errors_vars, self.line_errors_texts
-                    ):
-                        if var_cb.get():
-                            comments.append(text)
-                elif radio_value == 0:
-                    score = 0
+                if selected_option:
+                    # Вычисляем общее количество выбранных чекбоксов
+                    num_selected_checkboxes = 0
+                    if "suboption_vars" in selected_option:
+                        for var_cb, subtext in zip(
+                            selected_option["suboption_vars"],
+                            selected_option["suboptions"],
+                        ):
+                            if var_cb.get():
+                                num_selected_checkboxes += 1
+                                comments.append(subtext)
 
-            elif section.startswith("3."):
-                for var, value in vars_list:
-                    if var.get():
-                        score += value
-                        if value == -1:
-                            # Добавляем комментарии из ошибок
-                            index = self.obvodka_errors_vars.index(var)
-                            comments.append(self.obvodka_errors_texts[index])
-                # Ограничиваем баллы в пределах 0-2
-                score = max(0, min(2, score))
+                    # Вычисляем общую сумму вычитаемых баллов
+                    deduction = abs(main_score) * num_selected_checkboxes
 
-            elif section.startswith("4."):
-                for var, value in vars_list:
-                    if var.get():
-                        score += value
-                        if value == -1:
-                            # Добавляем комментарии из ошибок
-                            index = self.dimension_errors_vars.index(var)
-                            comments.append(self.dimension_errors_texts[index])
-                # Ограничиваем баллы в пределах 0-2
-                score = max(0, min(2, score))
+                    # Ограничиваем вычитание максимальным баллом по критерию
+                    deduction = min(deduction, max_score)
+
+                    # Итоговый балл по критерию
+                    score = max_score - deduction
+
+            elif data["type"] == "checkbox":
+                vars_list = data["vars"]
+                score = 0  # Начинаем с 0 для типа checkbox
+                for var_cb, var_score in vars_list:
+                    if var_cb.get():
+                        score += var_score
+                        if var_score < 0:
+                            comments.append(var_cb._name)  # Добавляем текст ошибки
+
+                # Ограничиваем баллы в пределах допустимых значений
+                score = max(0, min(max_score, score))
 
             section_scores[section] = score
             section_comments[section] = comments
@@ -778,7 +586,7 @@ class EvaluationApp:
         for (var, value), text in zip(self.penalty_vars, self.penalty_texts):
             if var.get():
                 # Если выбран пункт про плагиат, оценка обнуляется
-                if "плагиат" in text.lower() and var.get():
+                if value <= -1000 and var.get():
                     total_score = 0
                     penalty_comments.append(text)
                 else:
@@ -788,11 +596,11 @@ class EvaluationApp:
         # Учёт просрочки
         try:
             delay_days = int(self.delay_entry.get())
-            delay_penalty = -2 * delay_days
+            delay_penalty = self.delay_penalty_per_day * delay_days
             penalty_score += delay_penalty
             if delay_days > 0:
                 penalty_comments.append(
-                    f"Просрочка сдачи задания на {delay_days} дней (-{2 * delay_days} балла)"
+                    f"Просрочка сдачи задания на {delay_days} дней ({delay_penalty} балла)"
                 )
         except ValueError:
             delay_days = 0
@@ -826,10 +634,10 @@ class EvaluationApp:
         background_color = (255, 255, 255)
         text_color = (0, 0, 0)
 
-        # Шрифты Gilroy
-        title_font = ImageFont.truetype("gilroy-bold.ttf", 36)
-        header_font = ImageFont.truetype("gilroy-medium.ttf", 24)
-        text_font = ImageFont.truetype("gilroy-regular.ttf", 18)
+        # Шрифты
+        title_font = ImageFont.truetype("arial.ttf", 36)
+        header_font = ImageFont.truetype("arial.ttf", 24)
+        text_font = ImageFont.truetype("arial.ttf", 18)
 
         img = Image.new("RGB", (img_width, img_height), color=background_color)
         draw = ImageDraw.Draw(img)
