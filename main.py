@@ -556,7 +556,7 @@ class EvaluationApp:
                                 comments.append(subtext)
 
                     # Вычисляем общую сумму вычитаемых баллов
-                    deduction = abs(main_score) * (num_selected_checkboxes if abs(main_score) != max_score else 1)
+                    deduction = abs(main_score) * (num_selected_checkboxes if -main_score != max_score else 1)
 
                     # Ограничиваем вычитание максимальным баллом по критерию
                     deduction = min(deduction, max_score)
