@@ -376,10 +376,6 @@ class EvaluationApp:
         # Создаем штрафы из JSON-файла
         self.create_penalties_from_json()
 
-    def load_criteria_from_json(self):
-        # Загрузка происходит в load_homework_names
-        pass
-
     def load_criteria_for_homework(self, homework_name):
         # Очистка предыдущих критериев
         self.criteria_scores = {}
@@ -514,8 +510,8 @@ class EvaluationApp:
     def checkbox_callback(self, checkbox_var, score, main_var):
         if checkbox_var.get():
             main_var.set(score)
-        else:
-            pass
+        # else:
+        #     pass
 
     def radiobutton_callback(self, current_option, var_main, options_list):
         # Сбрасываем все чекбоксы под всеми опциями
