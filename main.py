@@ -53,8 +53,8 @@ class EvaluationApp:
         self.section_max_scores = {}
 
         self.create_info_tab()
-        self.create_criteria_tab()    # Перенесено перед load_info_parameters()
-        self.load_info_parameters()   # Загрузка сохраненных параметров
+        self.create_criteria_tab()  # Перенесено перед load_info_parameters()
+        self.load_info_parameters()  # Загрузка сохраненных параметров
         self.create_penalty_tab()
         self.create_report_tab()
 
@@ -388,7 +388,9 @@ class EvaluationApp:
             self.current_criteria = sections[homework_name]
             self.create_criteria()
         else:
-            tk.messagebox.showerror("Ошибка", f"Критерии для '{homework_name}' не найдены.")
+            tk.messagebox.showerror(
+                "Ошибка", f"Критерии для '{homework_name}' не найдены."
+            )
             self.current_criteria = []
 
     def create_criteria(self):
@@ -571,19 +573,213 @@ class EvaluationApp:
         self.status_var.set("Все поля сброшены к значениям по умолчанию.")
 
     def generate_report(self, save_to_file=True):
-        # Ваш существующий код для генерации отчета
-        # ...
+        # Проверка заполнения обязательных полей
+        if not self.student_var.get() or not self.group_var.get():
+            self.status_var.set("Пожалуйста, выберите группу и студента.")
+            return
+        # Рассчитываем баллы по критериям
+        total_score = 0
+        section_scores = {}
+        section_comments = {}
+        for section, data in self.criteria_scores.items():
+            max_score = self.section_max_scores.get(section, 0)
+            score = max_score  # Начинаем с максимального балла
+            comments = []
+            if data["type"] == "radio_with_subchecks":
+                main_var = data["main_var"]
+                main_score = main_var.get()
+                selected_option = None
+                # Находим выбранную опцию
+                for option in data["options"]:
+                    if option.get("score") == main_score:
+                        selected_option = option
+                        break
+                if selected_option:
+                    # Вычисляем общее количество выбранных чекбоксов
+                    num_selected_checkboxes = 0
+                    if "suboption_vars" in selected_option:
+                        for var_cb, subtext in zip(
+                            selected_option["suboption_vars"],
+                            selected_option["suboptions"],
+                        ):
+                            if var_cb.get():
+                                num_selected_checkboxes += 1
+                                comments.append(subtext)
+                    # Вычисляем общую сумму вычитаемых баллов
+                    deduction = abs(main_score) * (
+                        num_selected_checkboxes if -main_score != max_score else 1
+                    )
+                    # Ограничиваем вычитание максимальным баллом по критерию
+                    deduction = min(deduction, max_score)
+                    # Итоговый балл по критерию
+                    score = max_score - deduction
+            elif data["type"] == "checkbox":
+                vars_list = data["vars"]
+                score = 0  # Начинаем с 0 для типа checkbox
+                for var_cb, var_score in vars_list:
+                    if var_cb.get():
+                        score += var_score
+                        if var_score < 0:
+                            comments.append(var_cb._name)  # Добавляем текст ошибки
+                # Ограничиваем баллы в пределах допустимых значений
+                score = max(0, min(max_score, score))
+            section_scores[section] = score
+            section_comments[section] = comments
+            total_score += score
+        # Учёт штрафов
+        penalty_score = 0
+        penalty_comments = []
+        for (var, value), text in zip(self.penalty_vars, self.penalty_texts):
+            if var.get():
+                # Если выбран пункт про плагиат, оценка обнуляется
+                if value <= -1000 and var.get():
+                    total_score = 0
+                    penalty_comments.append(text)
+                else:
+                    penalty_score += value
+                    penalty_comments.append(text)
+        # Учёт просрочки
+        try:
+            delay_days = int(self.delay_entry.get())
+            delay_penalty = self.delay_penalty_per_day * delay_days
+            penalty_score += delay_penalty
+            if delay_days > 0:
+                penalty_comments.append(
+                    f"Просрочка сдачи задания на {delay_days} дней ({delay_penalty} балла)"
+                )
+        except ValueError:
+            delay_days = 0
+            delay_penalty = 0
+        # Общий итог
+        final_score = max(0, total_score + penalty_score)
+        if not self.on_time.get():
+            final_score = max(0, final_score)
+        # Генерация изображения оценочного листа
+        self.create_image(
+            section_scores, section_comments, penalty_comments, final_score, delay_days
+        )
+        # Сохранение изображения
+        if save_to_file:
+            self.save_image()
 
+    def create_image(
+        self,
+        section_scores,
+        section_comments,
+        penalty_comments,
+        final_score,
+        delay_days,
+    ):
+        # Настройки изображения
+        img_width = 1200  # Увеличено разрешение
+        img_height = 1500
+        background_color = (255, 255, 255)
+        text_color = (0, 0, 0)
+        # Шрифты
+        title_font = ImageFont.truetype("arial.ttf", 36)
+        header_font = ImageFont.truetype("arial.ttf", 24)
+        text_font = ImageFont.truetype("arial.ttf", 18)
+        img = Image.new("RGB", (img_width, img_height), color=background_color)
+        draw = ImageDraw.Draw(img)
+        y_position = 20
+        # Заголовок
+        draw.text(
+            (img_width // 2 - 150, y_position),
+            "Оценочный лист",
+            font=title_font,
+            fill=text_color,
+        )
+        y_position += 50
+        # Информация о студенте
+        student_info = f"Студент: {self.student_var.get()}    Группа: {self.group_var.get()}    Вариант: {self.variant_entry.get()}"
+        draw.text((50, y_position), student_info, font=text_font, fill=text_color)
+        y_position += 30
+        date_info = f"Сдано вовремя: {'Да' if self.on_time.get() else 'Нет'}    Дней просрочки: {delay_days}"
+        draw.text((50, y_position), date_info, font=text_font, fill=text_color)
+        y_position += 40
+        # Критерии
+        for section, score in section_scores.items():
+            draw.text((50, y_position), section, font=header_font, fill=text_color)
+            y_position += 30
+            draw.text(
+                (70, y_position), f"Баллы: {score}", font=text_font, fill=text_color
+            )
+            y_position += 30
+            comments = section_comments.get(section, [])
+            for comment in comments:
+                draw.text(
+                    (90, y_position), f"- {comment}", font=text_font, fill=text_color
+                )
+                y_position += 25
+            y_position += 10
+        # Штрафы
+        draw.text(
+            (50, y_position),
+            "Дополнительные штрафы:",
+            font=header_font,
+            fill=text_color,
+        )
+        y_position += 30
+        if penalty_comments:
+            for comment in penalty_comments:
+                draw.text(
+                    (70, y_position), f"- {comment}", font=text_font, fill=text_color
+                )
+                y_position += 25
+        else:
+            draw.text((70, y_position), "Нет", font=text_font, fill=text_color)
+            y_position += 25
+        y_position += 10
+        draw.line((50, y_position, img_width - 50, y_position), fill=text_color)
+        y_position += 10
+        # Итоговая оценка
+        draw.text(
+            (50, y_position),
+            f"Итоговая оценка: {final_score} из 10",
+            font=header_font,
+            fill=text_color,
+        )
+        self.generated_image = img
+
+    def save_image(self):
+        # Создание папки с названием домашней работы
+        hw_name = self.hw_name_entry.get()
+        if not hw_name:
+            self.status_var.set("Пожалуйста, введите название домашней работы.")
         # Проверка, что критерии загружены
         if not self.current_criteria:
             self.status_var.set("Пожалуйста, выберите домашнее задание.")
             return
 
-        # Остальная часть метода остается без изменений
-        # ...
+        if not os.path.exists(SUB_PATH):
+            os.makedirs(SUB_PATH)
+        hw_name = os.path.join(SUB_PATH, hw_name)
+        if not os.path.exists(hw_name):
+            os.makedirs(hw_name)
+        # Сохранение изображения с именем студента
+        student_name = self.student_var.get().replace(" ", "_")
+        filename = os.path.join(hw_name, f"{student_name}.png")
+        self.generated_image.save(filename)
+        self.status_var.set(f"Оценочный лист сохранен как '{filename}'.")
 
-    # Остальные методы остаются без изменений
-    # ...
+    def copy_to_clipboard(self):
+        # Генерация отчета, если он еще не создан
+        self.generate_report(save_to_file=False)
+        # Копирование изображения в буфер обмена
+        if sys.platform.startswith("win"):
+            output = io.BytesIO()
+            self.generated_image.convert("RGB").save(output, "BMP")
+            data = output.getvalue()[14:]
+            output.close()
+            win32clipboard.OpenClipboard()
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(win32clipboard.CF_DIB, data)
+            win32clipboard.CloseClipboard()
+            self.status_var.set("Оценочный лист скопирован в буфер обмена.")
+        else:
+            self.status_var.set(
+                "Копирование изображения в буфер обмена поддерживается только на Windows."
+            )
 
 
 if __name__ == "__main__":
