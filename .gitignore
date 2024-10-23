@@ -164,3 +164,4 @@ cython_debug/
 created_files/
 info_parameters.json
 *.csv
+student_variants.csv
