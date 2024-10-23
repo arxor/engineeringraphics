@@ -115,7 +115,12 @@ class EvaluationApp:
                         {"Фамилия": row["Фамилия"], "Имя": row["Имя"], "Группа": group}
                     )
         else:
-            tk.messagebox.showerror("Ошибка", "Файл student_list.csv не найден.")
+            with open("student_list.csv", "w", encoding="utf-8") as csvfile:
+                reader = csv.DictReader(csvfile, delimiter=";")
+                tk.messagebox.showerror(
+                    "Ошибка",
+                    "Не найден файл student_list.csv. Был создан новый пустой файл.",
+                )
 
         self.groups = sorted(list(self.groups))
 
@@ -384,14 +389,15 @@ class EvaluationApp:
 
         self.section_max_scores = {}
         sections = self.criteria_data.get("sections", {})
-        if homework_name in sections:
-            self.current_criteria = sections[homework_name]
-            self.create_criteria()
-        else:
-            tk.messagebox.showerror(
-                "Ошибка", f"Критерии для '{homework_name}' не найдены."
-            )
-            self.current_criteria = []
+        if homework_name is not None:
+            if homework_name in sections:
+                self.current_criteria = sections[homework_name]
+                self.create_criteria()
+            else:
+                tk.messagebox.showerror(
+                    "Ошибка", f"Критерии для '{homework_name}' не найдены."
+                )
+                self.current_criteria = []
 
     def create_criteria(self):
         for section in self.current_criteria:
