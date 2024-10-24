@@ -54,7 +54,7 @@ class EvaluationApp:
 
         self.create_info_tab()
         self.create_criteria_tab()
-        self.load_info_parameters()  # Загрузка сохраненных параметров
+        self.load_info_parameters()
         self.create_penalty_tab()
         self.create_report_tab()
 
@@ -173,7 +173,6 @@ class EvaluationApp:
         )
         self.variant_count_entry = tk.Entry(self.info_frame, width=10)
         self.variant_count_entry.grid(row=1, column=1, sticky="w", pady=5)
-        self.variant_count_entry.insert(0, "29")  # По умолчанию 29 вариантов
 
         # Группа
         tk.Label(self.info_frame, text="Группа:").grid(
@@ -270,10 +269,7 @@ class EvaluationApp:
             self.calculate_variant()
 
     def calculate_variant(self):
-        try:
-            variant_count = int(self.variant_count_entry.get())
-        except ValueError:
-            variant_count = 29  # По умолчанию 29 вариантов
+        variant_count = int(self.variant_count_entry.get())
 
         student_number = self.current_student_index + 1  # Нумерация с 1
         key = f"{self.group_var.get()};{self.student_var.get()}"
@@ -576,8 +572,6 @@ class EvaluationApp:
 
     def reset_fields(self):
         # Сбрасываем поля на вкладке "Информация о студенте"
-        self.variant_count_entry.delete(0, tk.END)
-        self.variant_count_entry.insert(0, "29")
         self.on_time.set(True)
 
         # Сбрасываем критерии оценки
