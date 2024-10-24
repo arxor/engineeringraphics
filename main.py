@@ -222,26 +222,6 @@ class EvaluationApp:
             self.info_frame, text="Сдано вовремя", variable=self.on_time
         ).grid(row=6, column=0, columnspan=2, sticky="w", pady=5)
 
-    def copy_to_clipboard(self):
-        # Генерация отчета, если он еще не создан
-        self.generate_report(save_to_file=False)
-
-        # Копирование изображения в буфер обмена
-        if sys.platform.startswith("win"):
-            output = io.BytesIO()
-            self.generated_image.convert("RGB").save(output, "BMP")
-            data = output.getvalue()[14:]
-            output.close()
-            win32clipboard.OpenClipboard()
-            win32clipboard.EmptyClipboard()
-            win32clipboard.SetClipboardData(win32clipboard.CF_DIB, data)
-            win32clipboard.CloseClipboard()
-            self.status_var.set("Оценочный лист скопирован в буфер обмена.")
-        else:
-            self.status_var.set(
-                "Копирование изображения в буфер обмена поддерживается только на Windows."
-            )
-
     def on_homework_selected(self, event):
         selected_homework = self.hw_name_var.get()
         self.current_homework = selected_homework
@@ -606,27 +586,41 @@ class EvaluationApp:
         if not self.student_var.get() or not self.group_var.get():
             self.status_var.set("Пожалуйста, выберите группу и студента.")
             return
+
+        print("\n===== НАЧАЛО ПОДСЧЕТА ОЦЕНКИ =====\n")
+        
         # Рассчитываем баллы по критериям
         total_score = 0
         section_scores = {}
         section_comments = {}
+
+        print("Начало обработки критериев:")
+        
         for section, data in self.criteria_scores.items():
             max_score = self.section_max_scores.get(section, 0)
-            score = max_score  # Начинаем с максимального балла
             comments = []
+            score = 0  # Инициализируем балл для секции
+            print(f"\nОбработка секции: {section}")
+            print(f"Максимальный балл для секции: {max_score}")
+
             if data["type"] == "radio_with_subchecks":
                 main_var = data["main_var"]
                 main_score = main_var.get()
                 selected_option = None
+                print(f"Выбрана радиокнопка с баллом: {main_score}")
+
                 # Находим выбранную опцию
                 for option in data["options"]:
                     if option.get("score") == main_score:
                         selected_option = option
                         break
+
                 if selected_option:
-                    # Вычисляем общее количество выбранных чекбоксов
-                    num_selected_checkboxes = 0
-                    if "suboption_vars" in selected_option:
+                    print(f"Выбрана опция: {selected_option['text']}")
+                    if "suboptions" in selected_option and selected_option["suboptions"]:
+                        print("Опция имеет субопции.")
+                        # Есть субопции, применяем логику вычитания
+                        num_selected_checkboxes = 0
                         for var_cb, subtext in zip(
                             selected_option["suboption_vars"],
                             selected_option["suboptions"],
@@ -634,15 +628,25 @@ class EvaluationApp:
                             if var_cb.get():
                                 num_selected_checkboxes += 1
                                 comments.append(subtext)
-                    # Вычисляем общую сумму вычитаемых баллов
-                    deduction = abs(main_score) * (
-                        num_selected_checkboxes if -main_score != max_score else 1
-                    )
-                    # Ограничиваем вычитание максимальным баллом по критерию
-                    deduction = min(deduction, max_score)
-                    # Итоговый балл по критерию
-                    score = max_score - deduction
+                                print(f"Выбрана субопция: {subtext}")
+
+                        deduction = abs(main_score) * num_selected_checkboxes
+                        deduction = min(deduction, max_score)
+                        score = max_score - deduction
+                        print(f"Количество выбранных субопций: {num_selected_checkboxes}")
+                        print(f"Вычет за субопции: {deduction}")
+                        print(f"Баллы за секцию {section}: {score}")
+                    else:
+                        # Нет субопций, устанавливаем балл, соответствующий радиокнопке
+                        score = main_score if main_score > 0 else max_score + main_score
+                        print(f"Нет субопций. Балл за секцию {section}: {score}")
+                else:
+                    # Если опция не выбрана, балл по умолчанию 0
+                    score = 0
+                    print(f"Опция не выбрана. Балл за секцию {section}: {score}")
+
             elif data["type"] == "checkbox":
+                print(f"Секция типа checkbox.")
                 vars_list = data["vars"]
                 score = 0  # Начинаем с 0 для типа checkbox
                 for var_cb, var_score in vars_list:
@@ -650,23 +654,33 @@ class EvaluationApp:
                         score += var_score
                         if var_score < 0:
                             comments.append(var_cb._name)  # Добавляем текст ошибки
+                        print(f"Выбран checkbox с баллом: {var_score}")
+
                 # Ограничиваем баллы в пределах допустимых значений
                 score = max(0, min(max_score, score))
+                print(f"Окончательный балл за checkbox секцию {section}: {score}")
+
             section_scores[section] = score
             section_comments[section] = comments
             total_score += score
+            print(f"Общий балл после секции {section}: {total_score}")
+
         # Учёт штрафов
         penalty_score = 0
         penalty_comments = []
+        print("\nОбработка штрафов:")
         for (var, value), text in zip(self.penalty_vars, self.penalty_texts):
             if var.get():
-                # Если выбран пункт про плагиат, оценка обнуляется
-                if value <= -1000 and var.get():
+                print(f"Выбран штраф: {text}, штраф: {value}")
+                if value <= -1000:
                     total_score = 0
                     penalty_comments.append(text)
+                    print(f"Плагиат обнаружен, оценка обнуляется.")
                 else:
                     penalty_score += value
                     penalty_comments.append(text)
+                    print(f"Добавлен штраф: {value}, текущий штрафной балл: {penalty_score}")
+
         # Учёт просрочки
         try:
             delay_days = int(self.delay_entry.get())
@@ -676,20 +690,30 @@ class EvaluationApp:
                 penalty_comments.append(
                     f"Просрочка сдачи задания на {delay_days} дней ({delay_penalty} балла)"
                 )
+                print(f"Просрочка сдачи на {delay_days} дней, штраф: {delay_penalty}")
         except ValueError:
             delay_days = 0
             delay_penalty = 0
+
         # Общий итог
         final_score = max(0, total_score + penalty_score)
         if not self.on_time.get():
             final_score = max(0, final_score)
+        print(f"\nОбщий балл перед штрафами: {total_score}")
+        print(f"Штрафные баллы: {penalty_score}")
+        print(f"Итоговый балл: {final_score}")
+
         # Получаем комментарий
         comment_text = self.comment_text.get("1.0", tk.END).strip()
+
         # Получаем поощрения
         reward_comments = []
+        print("\nОбработка поощрений:")
         for var, text in zip(self.reward_vars, self.reward_texts):
             if var.get():
                 reward_comments.append(text)
+                print(f"Выбрано поощрение: {text}")
+
         # Генерация изображения оценочного листа
         self.create_image(
             section_scores,
@@ -700,9 +724,13 @@ class EvaluationApp:
             comment_text,
             reward_comments,
         )
+
         # Сохранение изображения
         if save_to_file:
             self.save_image()
+
+        print("\n===== ОКОНЧАНИЕ ПОДСЧЕТА ОЦЕНКИ =====\n")
+
 
     def create_image(
         self,
