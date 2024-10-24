@@ -42,9 +42,9 @@ class EvaluationApp:
         self.criteria_frame = ttk.Frame(self.notebook)
         self.notebook.add(self.criteria_frame, text="Критерии оценки")
 
-        # Вкладка с дополнительными штрафами
+        # Вкладка с дополнительными штрафами и поощрениями
         self.penalty_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.penalty_frame, text="Дополнительные штрафы")
+        self.notebook.add(self.penalty_frame, text="Штрафы и поощрения")
 
         # Вкладка с генерацией отчета
         self.report_frame = ttk.Frame(self.notebook)
@@ -53,7 +53,7 @@ class EvaluationApp:
         self.section_max_scores = {}
 
         self.create_info_tab()
-        self.create_criteria_tab()  # Перенесено перед load_info_parameters()
+        self.create_criteria_tab()
         self.load_info_parameters()  # Загрузка сохраненных параметров
         self.create_penalty_tab()
         self.create_report_tab()
@@ -115,7 +115,12 @@ class EvaluationApp:
                         {"Фамилия": row["Фамилия"], "Имя": row["Имя"], "Группа": group}
                     )
         else:
-            tk.messagebox.showerror("Ошибка", "Файл student_list.csv не найден.")
+            with open("student_list.csv", "w", encoding="utf-8") as csvfile:
+                reader = csv.DictReader(csvfile, delimiter=";")
+                tk.messagebox.showerror(
+                    "Ошибка",
+                    "Не найден файл student_list.csv. Был создан новый пустой файл.",
+                )
 
         self.groups = sorted(list(self.groups))
 
@@ -242,7 +247,7 @@ class EvaluationApp:
         selected_homework = self.hw_name_var.get()
         self.current_homework = selected_homework
         self.load_criteria_for_homework(selected_homework)
-        # Нет необходимости обновлять штрафы, так как они общие
+        # Нет необходимости обновлять штрафы и поощрения, так как они общие
 
     def update_student_list(self, event):
         selected_group = self.group_var.get()
@@ -373,8 +378,8 @@ class EvaluationApp:
             "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
 
-        # Создаем штрафы из JSON-файла
-        self.create_penalties_from_json()
+        # Создаем штрафы и поощрения из JSON-файла
+        self.create_penalties_and_rewards_from_json()
 
     def load_criteria_for_homework(self, homework_name):
         # Очистка предыдущих критериев
@@ -384,14 +389,15 @@ class EvaluationApp:
 
         self.section_max_scores = {}
         sections = self.criteria_data.get("sections", {})
-        if homework_name in sections:
-            self.current_criteria = sections[homework_name]
-            self.create_criteria()
-        else:
-            tk.messagebox.showerror(
-                "Ошибка", f"Критерии для '{homework_name}' не найдены."
-            )
-            self.current_criteria = []
+        if homework_name is not None:
+            if homework_name in sections:
+                self.current_criteria = sections[homework_name]
+                self.create_criteria()
+            else:
+                tk.messagebox.showerror(
+                    "Ошибка", f"Критерии для '{homework_name}' не найдены."
+                )
+                self.current_criteria = []
 
     def create_criteria(self):
         for section in self.current_criteria:
@@ -475,11 +481,12 @@ class EvaluationApp:
                     "vars": vars_list,
                 }
 
-    def create_penalties_from_json(self):
-        # Очистка предыдущих штрафов
+    def create_penalties_and_rewards_from_json(self):
+        # Очистка предыдущих штрафов и поощрений
         for widget in self.penalty_inner_frame.winfo_children():
             widget.destroy()
 
+        # Штрафы
         tk.Label(self.penalty_inner_frame, text="Дополнительные штрафы:").pack(
             anchor="w", pady=5
         )
@@ -509,6 +516,21 @@ class EvaluationApp:
         self.delay_entry.pack(side="left", padx=5)
         self.delay_entry.insert(0, "0")
 
+        # Поощрения
+        tk.Label(self.penalty_inner_frame, text="Поощрения:").pack(anchor="w", pady=10)
+
+        self.reward_vars = []
+        self.reward_texts = []
+
+        rewards = self.criteria_data.get("rewards", [])
+        for reward in rewards:
+            text = reward.get("text", "")
+            var = tk.BooleanVar(value=False)
+            cb = ttk.Checkbutton(self.penalty_inner_frame, text=text, variable=var)
+            cb.pack(anchor="w")
+            self.reward_vars.append(var)
+            self.reward_texts.append(text)
+
     def checkbox_callback(self, checkbox_var, score, main_var):
         if checkbox_var.get():
             main_var.set(score)
@@ -528,6 +550,12 @@ class EvaluationApp:
         ttk.Label(
             self.report_frame, text="Нажмите кнопку для формирования оценочного листа."
         ).pack(pady=10)
+
+        # Добавляем поле для комментария
+        ttk.Label(self.report_frame, text="Комментарий:").pack(pady=5)
+        self.comment_text = tk.Text(self.report_frame, height=5, width=60)
+        self.comment_text.pack(pady=5)
+
         self.generate_button = ttk.Button(
             self.report_frame,
             text="Сформировать и сохранить оценочный лист",
@@ -569,6 +597,13 @@ class EvaluationApp:
             var.set(False)
         self.delay_entry.delete(0, tk.END)
         self.delay_entry.insert(0, "0")
+
+        # Сбрасываем поощрения
+        for var in self.reward_vars:
+            var.set(False)
+
+        # Сбрасываем комментарий
+        self.comment_text.delete("1.0", tk.END)
 
         self.status_var.set("Все поля сброшены к значениям по умолчанию.")
 
@@ -654,9 +689,22 @@ class EvaluationApp:
         final_score = max(0, total_score + penalty_score)
         if not self.on_time.get():
             final_score = max(0, final_score)
+        # Получаем комментарий
+        comment_text = self.comment_text.get("1.0", tk.END).strip()
+        # Получаем поощрения
+        reward_comments = []
+        for var, text in zip(self.reward_vars, self.reward_texts):
+            if var.get():
+                reward_comments.append(text)
         # Генерация изображения оценочного листа
         self.create_image(
-            section_scores, section_comments, penalty_comments, final_score, delay_days
+            section_scores,
+            section_comments,
+            penalty_comments,
+            final_score,
+            delay_days,
+            comment_text,
+            reward_comments,
         )
         # Сохранение изображения
         if save_to_file:
@@ -669,83 +717,315 @@ class EvaluationApp:
         penalty_comments,
         final_score,
         delay_days,
+        comment,
+        reward_comments,
     ):
         # Настройки изображения
         img_width = 1200  # Увеличено разрешение
-        img_height = 1500
+        img_height = 1500  # Увеличено высоту для размещения поощрений
         background_color = (255, 255, 255)
         text_color = (0, 0, 0)
-        # Шрифты
-        title_font = ImageFont.truetype("arial.ttf", 36)
-        header_font = ImageFont.truetype("arial.ttf", 24)
-        text_font = ImageFont.truetype("arial.ttf", 18)
+
+        # Определение путей к шрифтам (предполагается, что шрифты находятся в той же директории, что и скрипт)
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        gilroy_black_path = os.path.join(base_path, "gilroy-black.ttf")
+        gilroy_bold_path = os.path.join(base_path, "gilroy-bold.ttf")
+        gilroy_regular_path = os.path.join(base_path, "gilroy-regular.ttf")
+        gilroy_medium_path = os.path.join(base_path, "gilroy-medium.ttf")
+        segoe_emoji_path = os.path.join(base_path, "segoe-ui-emoji.ttf")
+
+        # Загрузка шрифтов
+        try:
+            title_font = ImageFont.truetype(gilroy_black_path, 36)
+            header_font = ImageFont.truetype(gilroy_bold_path, 24)
+            text_font = ImageFont.truetype(gilroy_regular_path, 18)
+            emoji_font = ImageFont.truetype(segoe_emoji_path, 18)
+        except IOError as e:
+            tk.messagebox.showerror(
+                "Ошибка",
+                f"Не удалось загрузить шрифты: {e}",
+            )
+            return
+
+        # Создание нового изображения
         img = Image.new("RGB", (img_width, img_height), color=background_color)
         draw = ImageDraw.Draw(img)
         y_position = 20
+
+        # Импорт внутри метода, чтобы избежать глобальных импортов
+        import emoji
+
+        def split_text_and_emojis(text):
+            """
+            Разделяет текст на сегменты: обычный текст и эмодзи.
+            Возвращает список кортежей вида ('text', текст) или ('emoji', эмодзи).
+            """
+            emojis = emoji.emoji_list(text)
+            segments = []
+            last_end = 0
+            for em in emojis:
+                start, end = em["match_start"], em["match_end"]
+                if start > last_end:
+                    # Добавляем текст перед эмодзи
+                    segments.append(("text", text[last_end:start]))
+                # Добавляем эмодзи
+                segments.append(("emoji", text[start:end]))
+                last_end = end
+            if last_end < len(text):
+                # Добавляем оставшийся текст
+                segments.append(("text", text[last_end:]))
+            return segments
+
+        def emoji_to_codepoints(emoji_char):
+            """
+            Преобразует эмодзи в строку кодовых точек, разделённых дефисами.
+            Например, 😀 -> '1f600'
+            """
+            codepoints = [f"{ord(ch):x}" for ch in emoji_char]
+            return "-".join(codepoints)
+
+        def draw_text_with_emojis(
+            draw, img, x, y, text, font_regular, font_emoji, fill
+        ):
+            """
+            Рисует текст с эмодзи на изображении с использованием объекта draw.
+            """
+            current_x = x
+            current_y = y
+            max_height = 0
+
+            segments = split_text_and_emojis(text)
+            for typ, segment in segments:
+                if typ == "text":
+                    # Рисуем текст
+                    draw.text(
+                        (current_x, current_y), segment, font=font_regular, fill=fill
+                    )
+                    bbox = font_regular.getbbox(segment)
+                    text_width = bbox[2] - bbox[0]
+                    text_height = bbox[3] - bbox[1]
+                    current_x += text_width
+                    max_height = max(max_height, text_height)
+                elif typ == "emoji":
+                    codepoint_seq = emoji_to_codepoints(segment)
+                    emoji_filename = os.path.join(
+                        base_path, "emoji_images", f"{codepoint_seq}.png"
+                    )
+                    if os.path.exists(emoji_filename):
+                        try:
+                            emoji_image = Image.open(emoji_filename).convert("RGBA")
+                            # Изменяем размер эмодзи, чтобы соответствовать высоте текста
+                            # Используем метод getbbox для символа 'A' как репрезентативного
+                            text_bbox = font_regular.getbbox("A")
+                            text_height = int(1.5 * text_bbox[3] - text_bbox[1])
+                            # Используем Image.Resampling.LANCZOS для Pillow >=10
+                            if hasattr(Image, "Resampling"):
+                                resample_filter = Image.Resampling.LANCZOS
+                            else:
+                                resample_filter = Image.LANCZOS
+                            emoji_image = emoji_image.resize(
+                                (text_height, text_height), resample=resample_filter
+                            )
+                            img.paste(emoji_image, (current_x, current_y), emoji_image)
+                            current_x += (
+                                text_height  # Смещаемся вправо на ширину эмодзи
+                            )
+                            max_height = max(max_height, text_height)
+                        except Exception as e:
+                            # В случае ошибки загрузки изображения эмодзи, рисуем его как текст
+                            print(e)
+                            draw.text(
+                                (current_x, current_y),
+                                segment,
+                                font=font_regular,
+                                fill=fill,
+                            )
+                            bbox = font_regular.getbbox(segment)
+                            text_width = bbox[2] - bbox[0]
+                            text_height = bbox[3] - bbox[1]
+                            current_x += text_width
+                            max_height = max(max_height, text_height)
+                    else:
+                        # pass
+                        # # Если изображение эмодзи не найдено, рисуем его как текст
+                        draw.text(
+                            (current_x, current_y),
+                            segment,
+                            font=font_emoji,
+                            fill=fill,
+                        )
+                        bbox = font_emoji.getbbox(segment)
+                        text_width = bbox[2] - bbox[0]
+                        text_height = bbox[3] - bbox[1]
+                        current_x += text_width
+                        max_height = max(max_height, text_height)
+            return current_y + max_height + 5
+
         # Заголовок
-        draw.text(
-            (img_width // 2 - 150, y_position),
-            "Оценочный лист",
-            font=title_font,
-            fill=text_color,
+        header_text = "Оценочный лист"
+        # Центрируем заголовок
+        header_width = (
+            title_font.getbbox(header_text)[2] - title_font.getbbox(header_text)[0]
         )
-        y_position += 50
+        header_x = (img_width - header_width) // 2
+        y_position = draw_text_with_emojis(
+            draw,
+            img,
+            header_x,
+            y_position,
+            header_text,
+            title_font,
+            emoji_font,
+            text_color,
+        )
+        y_position += 20  # Добавляем отступ после заголовка
+
         # Информация о студенте
         student_info = f"Студент: {self.student_var.get()}    Группа: {self.group_var.get()}    Вариант: {self.variant_entry.get()}"
-        draw.text((50, y_position), student_info, font=text_font, fill=text_color)
-        y_position += 30
+        y_position = draw_text_with_emojis(
+            draw, img, 50, y_position, student_info, text_font, emoji_font, text_color
+        )
+        y_position += 10
+
+        # Информация о сдаче
         date_info = f"Сдано вовремя: {'Да' if self.on_time.get() else 'Нет'}    Дней просрочки: {delay_days}"
-        draw.text((50, y_position), date_info, font=text_font, fill=text_color)
-        y_position += 40
+        y_position = draw_text_with_emojis(
+            draw, img, 50, y_position, date_info, text_font, emoji_font, text_color
+        )
+        y_position += 20
+
         # Критерии
         for section, score in section_scores.items():
-            draw.text((50, y_position), section, font=header_font, fill=text_color)
-            y_position += 30
-            draw.text(
-                (70, y_position), f"Баллы: {score}", font=text_font, fill=text_color
+            y_position = draw_text_with_emojis(
+                draw, img, 50, y_position, section, header_font, emoji_font, text_color
             )
-            y_position += 30
-            comments = section_comments.get(section, [])
-            for comment in comments:
-                draw.text(
-                    (90, y_position), f"- {comment}", font=text_font, fill=text_color
-                )
-                y_position += 25
             y_position += 10
-        # Штрафы
-        draw.text(
-            (50, y_position),
-            "Дополнительные штрафы:",
-            font=header_font,
-            fill=text_color,
-        )
-        y_position += 30
-        if penalty_comments:
-            for comment in penalty_comments:
-                draw.text(
-                    (70, y_position), f"- {comment}", font=text_font, fill=text_color
+            score_text = f"Баллы: {score}"
+            y_position = draw_text_with_emojis(
+                draw, img, 70, y_position, score_text, text_font, emoji_font, text_color
+            )
+            y_position += 5
+            comments = section_comments.get(section, [])
+            for comment_text in comments:
+                comment_line = f"- {comment_text}"
+                y_position = draw_text_with_emojis(
+                    draw,
+                    img,
+                    90,
+                    y_position,
+                    comment_line,
+                    text_font,
+                    emoji_font,
+                    text_color,
                 )
-                y_position += 25
-        else:
-            draw.text((70, y_position), "Нет", font=text_font, fill=text_color)
-            y_position += 25
+                y_position += 5
+            y_position += 10
+
+        # Штрафы
+        y_position = draw_text_with_emojis(
+            draw,
+            img,
+            50,
+            y_position,
+            "Дополнительные штрафы:",
+            header_font,
+            emoji_font,
+            text_color,
+        )
         y_position += 10
+        if penalty_comments:
+            for comment_text in penalty_comments:
+                comment_line = f"- {comment_text}"
+                y_position = draw_text_with_emojis(
+                    draw,
+                    img,
+                    70,
+                    y_position,
+                    comment_line,
+                    text_font,
+                    emoji_font,
+                    text_color,
+                )
+                y_position += 5
+        else:
+            y_position = draw_text_with_emojis(
+                draw, img, 70, y_position, "Нет", text_font, emoji_font, text_color
+            )
+            y_position += 5
+        y_position += 10
+
+        # Поощрения
+        y_position = draw_text_with_emojis(
+            draw,
+            img,
+            50,
+            y_position,
+            "И ещё кое-что:",
+            header_font,
+            emoji_font,
+            text_color,
+        )
+        y_position += 10
+        if reward_comments:
+            for reward in reward_comments:
+                y_position = draw_text_with_emojis(
+                    draw, img, 70, y_position, reward, text_font, emoji_font, text_color
+                )
+                y_position += 5
+        else:
+            y_position = draw_text_with_emojis(
+                draw, img, 70, y_position, "Нет", text_font, emoji_font, text_color
+            )
+            y_position += 5
+        y_position += 10
+
+        # Разделительная линия
         draw.line((50, y_position, img_width - 50, y_position), fill=text_color)
         y_position += 10
+
         # Итоговая оценка
-        draw.text(
-            (50, y_position),
-            f"Итоговая оценка: {final_score} из 10",
-            font=header_font,
-            fill=text_color,
+        final_score_text = f"Итоговая оценка: {final_score} из 10"
+        y_position = draw_text_with_emojis(
+            draw,
+            img,
+            50,
+            y_position,
+            final_score_text,
+            header_font,
+            emoji_font,
+            text_color,
         )
+        y_position += 20
+
+        # Комментарий
+        if comment:
+            y_position = draw_text_with_emojis(
+                draw,
+                img,
+                50,
+                y_position,
+                "Комментарий:",
+                header_font,
+                emoji_font,
+                text_color,
+            )
+            y_position += 10
+            # Разделяем комментарий на строки
+            lines = comment.split("\n")
+            for line in lines:
+                y_position = draw_text_with_emojis(
+                    draw, img, 70, y_position, line, text_font, emoji_font, text_color
+                )
+                y_position += 5
+
         self.generated_image = img
 
     def save_image(self):
         # Создание папки с названием домашней работы
-        hw_name = self.hw_name_entry.get()
+        hw_name = self.hw_name_var.get()
         if not hw_name:
-            self.status_var.set("Пожалуйста, введите название домашней работы.")
+            self.status_var.set("Пожалуйста, выберите название домашней работы.")
+            return
         # Проверка, что критерии загружены
         if not self.current_criteria:
             self.status_var.set("Пожалуйста, выберите домашнее задание.")
