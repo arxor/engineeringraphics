@@ -106,13 +106,11 @@ class EvaluationApp:
         self.groups = set()
         if os.path.exists("student_list.csv"):
             with open("student_list.csv", encoding="utf-8") as csvfile:
-                reader = csv.DictReader(csvfile, delimiter=";")
+                reader = csv.DictReader(csvfile, delimiter=",")
                 for row in reader:
-                    user_info = row["Данные о пользователе"]
-                    group = user_info.split(";")[-1].strip()
-                    self.groups.add(group)
+                    self.groups.add(row["Группы"])
                     self.student_data.append(
-                        {"Фамилия": row["Фамилия"], "Имя": row["Имя"], "Группа": group}
+                        {"Фамилия": row["Фамилия"], "Имя": row["Имя"], "Группа": row["Группы"]}
                     )
         else:
             with open("student_list.csv", "w", encoding="utf-8") as csvfile:
