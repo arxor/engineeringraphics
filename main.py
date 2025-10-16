@@ -27,8 +27,6 @@ class EvaluationApp:
 
         # Загрузка данных о студентах
         self.load_student_data()
-        # Загрузка вариантов студентов
-        self.load_student_variants()
 
         # Создаем вкладки
         self.notebook = ttk.Notebook(master)
@@ -57,6 +55,7 @@ class EvaluationApp:
         self.load_info_parameters()
         self.create_penalty_tab()
         self.create_report_tab()
+        self.register_shortcuts()
 
         # Строка состояния
         self.status_var = tk.StringVar()
@@ -79,6 +78,8 @@ class EvaluationApp:
             "student": self.student_var.get(),
             "variant": self.variant_entry.get(),
             "on_time": self.on_time.get(),
+            "double_mode_enabled": self.double_mode_enabled.get() if hasattr(self, "double_mode_enabled") else False,
+            "work_variant_is_eight": self.limit_to_eight.get() if hasattr(self, "limit_to_eight") else True,
         }
         with open("info_parameters.json", "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
@@ -100,43 +101,99 @@ class EvaluationApp:
                 self.variant_entry.delete(0, tk.END)
                 self.variant_entry.insert(0, data.get("variant", ""))
                 self.on_time.set(data.get("on_time", True))
+                if hasattr(self, "double_mode_enabled"):
+                    self.double_mode_enabled.set(data.get("double_mode_enabled", False))
+                if hasattr(self, "limit_to_eight"):
+                    self.limit_to_eight.set(data.get("work_variant_is_eight", True))
+                self._sync_double_mode_controls()
 
     def load_student_data(self):
+        """Load student list from CSV, creating a scaffold file if it is absent."""
         self.student_data = []
         self.groups = set()
-        if os.path.exists("student_list.csv"):
-            with open("student_list.csv", encoding="utf-8") as csvfile:
-                reader = csv.DictReader(csvfile, delimiter=",")
+        self.student_lookup = {}
+        filename = "student_list.csv"
+        if not os.path.exists(filename):
+            with open(filename, "w", encoding="utf-8", newline="") as csvfile:
+                csvfile.write("ФИО;Группа;Номер Варианта\n")
+            tk.messagebox.showwarning(
+                "Нет данных о студентах",
+                "Файл student_list.csv не найден. Создан шаблонный файл. "
+                "Добавьте студентов и перезапустите приложение.",
+            )
+            self.groups = []
+            return
+
+        def _read_students(delimiter):
+            with open(filename, encoding="utf-8-sig") as csvfile:
+                reader = csv.DictReader(csvfile, delimiter=delimiter)
                 for row in reader:
-                    self.groups.add(row["Группы"])
-                    self.student_data.append(
-                        {"Фамилия": row["Фамилия"], "Имя": row["Имя"], "Группа": row["Группы"]}
-                    )
-        else:
-            with open("student_list.csv", "w", encoding="utf-8") as csvfile:
-                reader = csv.DictReader(csvfile, delimiter=";")
-                tk.messagebox.showerror(
-                    "Ошибка",
-                    "Не найден файл student_list.csv. Был создан новый пустой файл.",
+                    normalized_row = {
+                        (key.strip().lstrip("\ufeff") if key else key): value
+                        for key, value in row.items()
+                    }
+                    fio = (
+                        normalized_row.get("ФИО")
+                        or " ".join(
+                            part
+                            for part in [
+                                normalized_row.get("Фамилия", "").strip(),
+                                normalized_row.get("Имя", "").strip(),
+                            ]
+                            if part
+                        )
+                    ).strip()
+                    group_name = (
+                        normalized_row.get("Группа")
+                        or normalized_row.get("Группы")
+                        or normalized_row.get("Данные о пользователе", "")
+                    ).strip()
+                    variant_number = (
+                        normalized_row.get("Номер Варианта")
+                        or normalized_row.get("Вариант")
+                        or ""
+                    ).strip()
+                    if not (fio and group_name):
+                        continue
+                    student_record = {
+                        "ФИО": fio,
+                        "Группа": group_name,
+                        "Номер Варианта": variant_number,
+                    }
+                    self.groups.add(group_name)
+                    self.student_data.append(student_record)
+                    self.student_lookup[(group_name, fio)] = student_record
+
+        # Попытка прочитать как CSV с разделителем ';', затем ','.
+        try:
+            _read_students(";")
+        except csv.Error:
+            self.student_data.clear()
+            self.student_lookup.clear()
+            _read_students(",")
+
+        self.groups = sorted(self.groups)
+        if not self.groups:
+            tk.messagebox.showwarning(
+                "Пустой список студентов",
+                "Не удалось найти валидные записи в student_list.csv. "
+                "Проверьте структуру файла (ФИО;Группа;Номер Варианта).",
+            )
+
+    def save_student_list(self):
+        filename = "student_list.csv"
+        fieldnames = ["ФИО", "Группа", "Номер Варианта"]
+        with open(filename, "w", encoding="utf-8", newline="") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=";")
+            writer.writeheader()
+            for record in self.student_data:
+                writer.writerow(
+                    {
+                        "ФИО": record.get("ФИО", ""),
+                        "Группа": record.get("Группа", ""),
+                        "Номер Варианта": record.get("Номер Варианта", ""),
+                    }
                 )
-
-        self.groups = sorted(list(self.groups))
-
-    def load_student_variants(self):
-        self.student_variants = {}
-        if os.path.exists("student_variants.csv"):
-            with open("student_variants.csv", encoding="utf-8") as csvfile:
-                reader = csv.reader(csvfile)
-                for row in reader:
-                    key = row[0]  # 'Группа;Фамилия Имя'
-                    variant = row[1]
-                    self.student_variants[key] = variant
-
-    def save_student_variants(self):
-        with open("student_variants.csv", "w", encoding="utf-8", newline="") as csvfile:
-            writer = csv.writer(csvfile)
-            for key, variant in self.student_variants.items():
-                writer.writerow([key, variant])
 
     def load_homework_names(self):
         try:
@@ -144,6 +201,7 @@ class EvaluationApp:
                 self.criteria_data = json.load(f)
             self.homework_names = list(self.criteria_data.get("sections", {}).keys())
         except Exception as e:
+            self.criteria_data = {"sections": {}, "penalties": [], "rewards": [], "delays": {}}
             tk.messagebox.showerror("Ошибка", f"Не удалось загрузить критерии: {e}")
             self.homework_names = []
 
@@ -171,6 +229,7 @@ class EvaluationApp:
         )
         self.variant_count_entry = tk.Entry(self.info_frame, width=10)
         self.variant_count_entry.grid(row=1, column=1, sticky="w", pady=5)
+        self.variant_count_entry.insert(0, "29")
 
         # Группа
         tk.Label(self.info_frame, text="Группа:").grid(
@@ -216,9 +275,32 @@ class EvaluationApp:
 
         # Сдано вовремя
         self.on_time = tk.BooleanVar(value=True)
+        self.on_time.trace_add("write", self._on_on_time_toggle)
         tk.Checkbutton(
             self.info_frame, text="Сдано вовремя", variable=self.on_time
         ).grid(row=6, column=0, columnspan=2, sticky="w", pady=5)
+
+        # Двойной режим оценивания
+        self.double_mode_enabled = tk.BooleanVar(value=False)
+        self.double_mode_enabled.trace_add("write", self._on_double_mode_toggle)
+        tk.Checkbutton(
+            self.info_frame,
+            text="Включить двойной режим оценивания",
+            variable=self.double_mode_enabled,
+        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=5)
+
+        # Вариант работы (8 или 10 баллов)
+        self.limit_to_eight = tk.BooleanVar(value=True)
+        self.student_variant_checkbox = tk.Checkbutton(
+            self.info_frame,
+            text="Студент выбрал вариант работы на макс. оценку 8",
+            variable=self.limit_to_eight,
+        )
+        self.student_variant_checkbox.grid(
+            row=8, column=0, columnspan=2, sticky="w", pady=5
+        )
+        self.student_variant_checkbox.configure(state="disabled")
+        self._sync_double_mode_controls()
 
     def on_homework_selected(self, event):
         selected_homework = self.hw_name_var.get()
@@ -230,10 +312,10 @@ class EvaluationApp:
         selected_group = self.group_var.get()
         students_in_group = sorted(
             [s for s in self.student_data if s["Группа"] == selected_group],
-            key=lambda x: x["Фамилия"],
+            key=lambda x: x["ФИО"],
         )
         self.students_in_group = students_in_group  # Сохраняем для навигации
-        self.student_names = [f"{s['Фамилия']} {s['Имя']}" for s in students_in_group]
+        self.student_names = [s["ФИО"] for s in students_in_group]
         self.student_combobox["values"] = self.student_names
         if self.student_names:
             self.current_student_index = 0
@@ -265,15 +347,31 @@ class EvaluationApp:
             self.calculate_variant()
             # После пересчёта варианта устанавливаем критерии на максимальные значения:
             self.set_criteria_to_max()
+            if hasattr(self, "double_mode_enabled") and self.double_mode_enabled.get():
+                self.limit_to_eight.set(True)
 
     def calculate_variant(self):
-        variant_count = int(self.variant_count_entry.get())
+        raw_count = self.variant_count_entry.get().strip()
+        try:
+            variant_count = int(raw_count)
+            if variant_count <= 0:
+                raise ValueError
+        except ValueError:
+            if hasattr(self, "status_var"):
+                self.status_var.set("Количество вариантов должно быть целым положительным числом.")
+            self.variant_entry.configure(state="normal")
+            self.variant_entry.delete(0, tk.END)
+            return
 
         student_number = self.current_student_index + 1  # Нумерация с 1
-        key = f"{self.group_var.get()};{self.student_var.get()}"
-        if key in self.student_variants:
-            variant_number = self.student_variants[key]
-        else:
+        group = self.group_var.get()
+        student_name = self.student_var.get()
+        record = self.student_lookup.get((group, student_name))
+        variant_number = ""
+        if record:
+            variant_number = record.get("Номер Варианта", "").strip()
+
+        if not variant_number:
             if student_number > variant_count:
                 variant_number = student_number % variant_count
                 if variant_number == 0:
@@ -286,10 +384,17 @@ class EvaluationApp:
         self.variant_entry.configure(state="normal")
 
     def save_variant(self, event):
-        key = f"{self.group_var.get()};{self.student_var.get()}"
-        variant_number = self.variant_entry.get()
-        self.student_variants[key] = variant_number
-        self.save_student_variants()
+        group = self.group_var.get()
+        student_name = self.student_var.get()
+        variant_number = self.variant_entry.get().strip()
+        if not variant_number.isdigit():
+            if hasattr(self, "status_var"):
+                self.status_var.set("Введите числовое значение варианта.")
+            return
+        record = self.student_lookup.get((group, student_name))
+        if record is not None:
+            record["Номер Варианта"] = variant_number
+            self.save_student_list()
 
     def prev_student(self):
         if self.current_student_index > 0:
@@ -388,9 +493,10 @@ class EvaluationApp:
                 self.current_criteria = sections[homework_name]
                 self.create_criteria()
             else:
-                tk.messagebox.showerror(
-                    "Ошибка", f"Критерии для '{homework_name}' не найдены."
-                )
+                if homework_name:
+                    tk.messagebox.showerror(
+                        "Ошибка", f"Критерии для '{homework_name}' не найдены."
+                    )
                 self.current_criteria = []
 
     def create_criteria(self):
@@ -507,21 +613,22 @@ class EvaluationApp:
         self.delay_entry = tk.Entry(delay_frame, width=5)
         self.delay_entry.pack(side="left", padx=5)
         self.delay_entry.insert(0, "0")
+        self.delay_entry.bind("<KeyRelease>", self._on_delay_changed)
+        self.delay_entry.bind("<FocusOut>", self._on_delay_changed)
 
         # Поощрения
         tk.Label(self.penalty_inner_frame, text="Поощрения:").pack(anchor="w", pady=10)
 
-        self.reward_vars = []
-        self.reward_texts = []
+        self.reward_items = []
 
         rewards = self.criteria_data.get("rewards", [])
         for reward in rewards:
-            text = reward.get("text", "")
+            text = reward.get("text", "").strip()
+            score = float(reward.get("score", 0) or 0)
             var = tk.BooleanVar(value=False)
             cb = ttk.Checkbutton(self.penalty_inner_frame, text=text, variable=var)
             cb.pack(anchor="w")
-            self.reward_vars.append(var)
-            self.reward_texts.append(text)
+            self.reward_items.append({"var": var, "text": text, "score": score})
 
     def checkbox_callback(self, checkbox_var, score, main_var):
         if checkbox_var.get():
@@ -535,6 +642,101 @@ class EvaluationApp:
             if "suboption_vars" in opt:
                 for sub_var in opt["suboption_vars"]:
                     sub_var.set(False)
+
+    def _on_on_time_toggle(self, *_):
+        if not hasattr(self, "delay_entry"):
+            return
+        current_delay = self.delay_entry.get().strip()
+        if self.on_time.get():
+            if current_delay and current_delay != "0":
+                self.delay_entry.delete(0, tk.END)
+                self.delay_entry.insert(0, "0")
+        else:
+            if not current_delay or current_delay == "0":
+                self.delay_entry.delete(0, tk.END)
+                self.delay_entry.insert(0, "1")
+
+    def _on_double_mode_toggle(self, *_):
+        if self.double_mode_enabled.get() and not self.limit_to_eight.get():
+            self.limit_to_eight.set(True)
+        self._sync_double_mode_controls()
+
+    def _sync_double_mode_controls(self):
+        if not hasattr(self, "student_variant_checkbox"):
+            return
+        if self.double_mode_enabled.get():
+            self.student_variant_checkbox.configure(state="normal")
+        else:
+            self.student_variant_checkbox.configure(state="disabled")
+            if not self.limit_to_eight.get():
+                self.limit_to_eight.set(True)
+
+    def _resolve_scoring_scale(self, section_total_max):
+        section_total_max = float(section_total_max or 0.0)
+        if hasattr(self, "double_mode_enabled") and self.double_mode_enabled.get():
+            if self.limit_to_eight.get():
+                target_cap = 8.0
+                if section_total_max > 0:
+                    scaling_factor = min(1.0, target_cap / section_total_max)
+                else:
+                    scaling_factor = 1.0
+                effective_cap = target_cap if section_total_max > 0 else target_cap
+                display_cap = target_cap
+                return max(0.0, effective_cap), display_cap, scaling_factor
+            else:
+                target_cap = 10.0
+                effective_cap = min(section_total_max, target_cap) if section_total_max > 0 else target_cap
+                return max(0.0, effective_cap), target_cap, 1.0
+        return max(0.0, section_total_max), section_total_max if section_total_max > 0 else 10.0, 1.0
+
+    @staticmethod
+    def _format_score(value):
+        if isinstance(value, (int, float)):
+            formatted = f"{float(value):.2f}".rstrip("0").rstrip(".")
+            return formatted if formatted else "0"
+        return str(value)
+
+    def _on_delay_changed(self, event=None):
+        value = self.delay_entry.get().strip() if hasattr(self, "delay_entry") else ""
+        if not value:
+            if self.on_time.get() is False:
+                self.on_time.set(True)
+            return
+        try:
+            days = int(value)
+        except ValueError:
+            return
+        if days < 0:
+            return
+        if days > 0:
+            if self.on_time.get():
+                self.on_time.set(False)
+        else:
+            if not self.on_time.get():
+                self.on_time.set(True)
+
+    def register_shortcuts(self):
+        self.master.bind("<Control-Left>", self._shortcut_prev_student)
+        self.master.bind("<Control-Right>", self._shortcut_next_student)
+        self.master.bind("<Control-Return>", self._shortcut_generate_report)
+        self.master.bind("<Control-s>", self._shortcut_generate_report)
+        self.master.bind("<Control-Shift-C>", self._shortcut_copy_report)
+
+    def _shortcut_prev_student(self, event):
+        self.prev_student()
+        return "break"
+
+    def _shortcut_next_student(self, event):
+        self.next_student()
+        return "break"
+
+    def _shortcut_generate_report(self, event):
+        self.generate_report()
+        return "break"
+
+    def _shortcut_copy_report(self, event):
+        self.copy_to_clipboard()
+        return "break"
 
     def create_report_tab(self):
         ttk.Label(
@@ -567,6 +769,9 @@ class EvaluationApp:
     def reset_fields(self):
         # Сбрасываем поля на вкладке "Информация о студенте"
         self.on_time.set(True)
+        if hasattr(self, "limit_to_eight"):
+            self.limit_to_eight.set(True)
+        self._sync_double_mode_controls()
 
         # Сбрасываем критерии оценки
         for section, data in self.criteria_scores.items():
@@ -587,8 +792,10 @@ class EvaluationApp:
         self.delay_entry.insert(0, "0")
 
         # Сбрасываем поощрения
-        for var in self.reward_vars:
-            var.set(False)
+        for reward_item in getattr(self, "reward_items", []):
+            reward_item["var"].set(False)
+        for reward_item in getattr(self, "reward_items", []):
+            reward_item["var"].set(False)
 
         # Сбрасываем комментарий
         self.comment_text.delete("1.0", tk.END)
@@ -601,9 +808,9 @@ class EvaluationApp:
             return
 
         # Рассчитываем баллы по критериям
-        total_score = 0
         section_scores = {}
         section_comments = {}
+        section_raw_total = 0.0
 
         for section, data in self.criteria_scores.items():
             max_score = float(self.section_max_scores.get(section, 0.0))
@@ -661,44 +868,96 @@ class EvaluationApp:
 
             section_scores[section] = score
             section_comments[section] = comments
-            total_score += score
+            section_raw_total += score
 
         # Учёт штрафов
         penalty_score = 0.0
         penalty_comments = []
-        for (var, value), text in zip(self.penalty_vars, self.penalty_texts):
+        disqualified = False
+        penalty_pairs = getattr(self, "penalty_vars", [])
+        penalty_texts = getattr(self, "penalty_texts", [])
+        for (var, value), text in zip(penalty_pairs, penalty_texts):
             val = float(value)
-            if var.get():
-                if val <= -1000:
-                    # Плагиат, обнуляем балл
-                    total_score = 0.0
-                    penalty_comments.append(text)
-                else:
-                    penalty_score += val
-                    penalty_comments.append(text)
+            if not var.get():
+                continue
+            if val <= -1000:
+                disqualified = True
+                penalty_comments.append(text)
+            else:
+                penalty_score += val
+                penalty_comments.append(text)
 
         # Учёт просрочки
-        try:
-            delay_days = int(self.delay_entry.get())
-            delay_penalty = float(self.delay_penalty_per_day) * delay_days
-            penalty_score += delay_penalty
-            if delay_days > 0:
-                penalty_comments.append(
-                    f"Просрочка сдачи задания на {delay_days} дней ({delay_penalty} балла)"
-                )
-        except ValueError:
+        delay_raw = self.delay_entry.get().strip()
+        if not delay_raw:
             delay_days = 0
+        else:
+            try:
+                delay_days = int(delay_raw)
+            except ValueError:
+                self.status_var.set("Количество дней просрочки должно быть целым числом.")
+                return
+            if delay_days < 0:
+                self.status_var.set("Количество дней просрочки не может быть отрицательным.")
+                return
 
-        final_score = max(0.0, total_score + penalty_score)
-        if not self.on_time.get():
-            final_score = max(0.0, final_score)
+        effective_delay_days = delay_days
+        if not self.on_time.get() and effective_delay_days == 0:
+            effective_delay_days = 1
+
+        delay_penalty_comment_index = None
+        if effective_delay_days > 0:
+            delay_penalty = float(self.delay_penalty_per_day) * effective_delay_days
+            penalty_score += delay_penalty
+            delay_penalty_comment_index = len(penalty_comments)
+            penalty_comments.append("")
+        else:
+            delay_penalty = 0.0
+            delay_penalty_comment_index = None
 
         comment_text = self.comment_text.get("1.0", tk.END).strip()
 
         reward_comments = []
-        for var, text in zip(self.reward_vars, self.reward_texts):
-            if var.get():
-                reward_comments.append(text)
+        reward_bonus = 0.0
+        for reward_item in getattr(self, "reward_items", []):
+            if reward_item["var"].get():
+                reward_comments.append(reward_item["text"])
+                reward_bonus += float(reward_item["score"])
+
+        if disqualified:
+            total_score = 0.0
+            penalty_score = 0.0
+            reward_bonus = 0.0
+
+        max_total_score = sum(self.section_max_scores.values()) or 0.0
+        effective_cap, display_cap, scaling_factor = self._resolve_scoring_scale(max_total_score)
+
+        if scaling_factor != 1.0:
+            section_scores = {
+                key: value * scaling_factor for key, value in section_scores.items()
+            }
+            penalty_score *= scaling_factor
+            reward_bonus *= scaling_factor
+            delay_penalty *= scaling_factor
+        total_score = sum(section_scores.values())
+        raw_total = total_score + penalty_score + reward_bonus
+        if effective_cap > 0:
+            final_score = max(0.0, min(effective_cap, raw_total))
+        else:
+            final_score = max(0.0, raw_total)
+
+        if delay_penalty_comment_index is not None and 0 <= delay_penalty_comment_index < len(penalty_comments):
+            penalty_comments[delay_penalty_comment_index] = (
+                f"Просрочка сдачи задания на {effective_delay_days} дн. "
+                f"({self._format_score(delay_penalty)} балла)"
+            )
+
+        delay_days = effective_delay_days
+
+        if hasattr(self, "status_var"):
+            self.status_var.set(
+                f"Рассчитан итог: {self._format_score(final_score)} из {self._format_score(display_cap)}."
+            )
 
         # Генерация изображения с отчётом
         self.create_image(
@@ -706,6 +965,7 @@ class EvaluationApp:
             section_comments,
             penalty_comments,
             final_score,
+            display_cap,
             delay_days,
             comment_text,
             reward_comments,
@@ -722,6 +982,7 @@ class EvaluationApp:
         section_comments,
         penalty_comments,
         final_score,
+        max_score_cap,
         delay_days,
         comment,
         reward_comments,
@@ -893,6 +1154,18 @@ class EvaluationApp:
         )
         y_position += 10
 
+        if (
+            hasattr(self, "double_mode_enabled")
+            and self.double_mode_enabled.get()
+            and hasattr(self, "limit_to_eight")
+        ):
+            cap_text = self._format_score(8 if self.limit_to_eight.get() else 10)
+            variant_text = f"Вариант работы: максимум {cap_text} баллов"
+            y_position = draw_text_with_emojis(
+                draw, img, 50, y_position, variant_text, text_font, emoji_font, text_color
+            )
+            y_position += 10
+
         # Информация о сдаче
         date_info = f"Сдано вовремя: {'Да' if self.on_time.get() else 'Нет'}    Дней просрочки: {delay_days}"
         y_position = draw_text_with_emojis(
@@ -906,7 +1179,7 @@ class EvaluationApp:
                 draw, img, 50, y_position, section, header_font, emoji_font, text_color
             )
             y_position += 10
-            score_text = f"Баллы: {score}"
+            score_text = f"Баллы: {self._format_score(score)}"
             y_position = draw_text_with_emojis(
                 draw, img, 70, y_position, score_text, text_font, emoji_font, text_color
             )
@@ -990,7 +1263,7 @@ class EvaluationApp:
         y_position += 10
 
         # Итоговая оценка
-        final_score_text = f"Итоговая оценка: {final_score} из 10"
+        final_score_text = f"Итоговая оценка: {self._format_score(final_score)} из {self._format_score(max_score_cap)}"
         y_position = draw_text_with_emojis(
             draw,
             img,
