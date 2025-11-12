@@ -49,6 +49,7 @@ class EvaluationApp:
         self.notebook.add(self.report_frame, text="Генерация отчета")
 
         self.section_max_scores = {}
+        self.current_criteria_source = None
 
         self.create_info_tab()
         self.create_criteria_tab()
@@ -70,6 +71,15 @@ class EvaluationApp:
         self.save_info_parameters()
         self.master.destroy()
 
+    @staticmethod
+    def _normalize_homework_name(hw_name):
+        mapping = {
+            "Домашнее задание №1 до 8": "Домашнее задание №1",
+            "Домашнее задание №1 9-10": "Домашнее задание №1",
+            "ДЗ_1": "Домашнее задание №1",
+        }
+        return mapping.get(hw_name, hw_name)
+
     def save_info_parameters(self):
         data = {
             "hw_name": self.hw_name_var.get(),
@@ -86,9 +96,14 @@ class EvaluationApp:
 
     def load_info_parameters(self):
         if os.path.exists("info_parameters.json"):
-            with open("info_parameters.json", "r", encoding="utf-8") as f:
-                data = json.load(f)
-                self.hw_name_var.set(data.get("hw_name", ""))
+            try:
+                with open("info_parameters.json", "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except json.JSONDecodeError:
+                with open("info_parameters.json", "r", encoding="utf-8-sig") as f:
+                    data = json.load(f)
+                hw_name = self._normalize_homework_name(data.get("hw_name", ""))
+                self.hw_name_var.set(hw_name)
                 self.on_homework_selected(None)  # Обновляем критерии
                 self.variant_count_entry.delete(0, tk.END)
                 self.variant_count_entry.insert(0, data.get("variant_count", "29"))
@@ -291,6 +306,7 @@ class EvaluationApp:
 
         # Вариант работы (8 или 10 баллов)
         self.limit_to_eight = tk.BooleanVar(value=True)
+        self.limit_to_eight.trace_add("write", self._on_limit_to_eight_toggle)
         self.student_variant_checkbox = tk.Checkbutton(
             self.info_frame,
             text="Студент выбрал вариант работы на макс. оценку 8",
@@ -481,23 +497,40 @@ class EvaluationApp:
         self.create_penalties_and_rewards_from_json()
 
     def load_criteria_for_homework(self, homework_name):
-        # Очистка предыдущих критериев
-        self.criteria_scores = {}
+        self.current_homework = homework_name
+        sections = self.criteria_data.get("sections", {})
+        self.current_criteria_source = None
+        if homework_name and homework_name in sections:
+            self.current_criteria_source = sections[homework_name]
+        elif homework_name:
+            tk.messagebox.showerror(
+                "Ошибка", f"Критерии для '{homework_name}' не найдены."
+            )
+        self._render_current_criteria()
+
+    def _get_current_criteria_list(self):
+        source = getattr(self, "current_criteria_source", None)
+        if isinstance(source, dict):
+            base_sections = source.get("base", [])
+            extended_sections = source.get("extended", [])
+            use_extended = hasattr(self, "limit_to_eight") and not self.limit_to_eight.get()
+            return list(base_sections) + (list(extended_sections) if use_extended else [])
+        if isinstance(source, list):
+            return source
+        return []
+
+    def _render_current_criteria(self):
+        if not hasattr(self, "criteria_inner_frame"):
+            return
         for widget in self.criteria_inner_frame.winfo_children():
             widget.destroy()
-
+        self.criteria_scores = {}
         self.section_max_scores = {}
-        sections = self.criteria_data.get("sections", {})
-        if homework_name is not None:
-            if homework_name in sections:
-                self.current_criteria = sections[homework_name]
-                self.create_criteria()
-            else:
-                if homework_name:
-                    tk.messagebox.showerror(
-                        "Ошибка", f"Критерии для '{homework_name}' не найдены."
-                    )
-                self.current_criteria = []
+        self.current_criteria = self._get_current_criteria_list()
+        if not self.current_criteria:
+            return
+        self.create_criteria()
+        self.set_criteria_to_max()
 
     def create_criteria(self):
         for section in self.current_criteria:
@@ -605,7 +638,7 @@ class EvaluationApp:
         # Просрочка
         delay_info = self.criteria_data.get("delays", {})
         delay_text = delay_info.get("text", "")
-        self.delay_penalty_per_day = delay_info.get("score_per_day", -2)
+        self.delay_penalty_per_day = delay_info.get("score_per_day", 0)
 
         delay_frame = ttk.Frame(self.penalty_inner_frame)
         delay_frame.pack(fill="x", pady=10)
@@ -671,23 +704,31 @@ class EvaluationApp:
             if not self.limit_to_eight.get():
                 self.limit_to_eight.set(True)
 
+    def _on_limit_to_eight_toggle(self, *_):
+        if not getattr(self, "current_homework", None):
+            return
+        if not getattr(self, "criteria_data", None):
+            return
+        self._render_current_criteria()
+
     def _resolve_scoring_scale(self, section_total_max):
         section_total_max = float(section_total_max or 0.0)
-        if hasattr(self, "double_mode_enabled") and self.double_mode_enabled.get():
-            if self.limit_to_eight.get():
-                target_cap = 8.0
-                if section_total_max > 0:
-                    scaling_factor = min(1.0, target_cap / section_total_max)
-                else:
-                    scaling_factor = 1.0
-                effective_cap = target_cap if section_total_max > 0 else target_cap
-                display_cap = target_cap
-                return max(0.0, effective_cap), display_cap, scaling_factor
-            else:
-                target_cap = 10.0
-                effective_cap = min(section_total_max, target_cap) if section_total_max > 0 else target_cap
-                return max(0.0, effective_cap), target_cap, 1.0
-        return max(0.0, section_total_max), section_total_max if section_total_max > 0 else 10.0, 1.0
+        limit_to_eight = hasattr(self, "limit_to_eight") and self.limit_to_eight.get()
+        double_mode_on = hasattr(self, "double_mode_enabled") and self.double_mode_enabled.get()
+
+        if limit_to_eight:
+            target_cap = 8.0
+            effective_cap = min(section_total_max, target_cap) if section_total_max > 0 else target_cap
+            return max(0.0, effective_cap), target_cap, 1.0
+
+        if double_mode_on:
+            target_cap = 10.0
+            effective_cap = target_cap
+            return max(0.0, effective_cap), target_cap, 1.0
+
+        display_cap = section_total_max if section_total_max > 0 else 10.0
+        effective_cap = section_total_max
+        return max(0.0, effective_cap), display_cap, 1.0
 
     @staticmethod
     def _format_score(value):
@@ -905,15 +946,12 @@ class EvaluationApp:
         if not self.on_time.get() and effective_delay_days == 0:
             effective_delay_days = 1
 
+        forced_zero_due_to_delay = False
         delay_penalty_comment_index = None
         if effective_delay_days > 0:
-            delay_penalty = float(self.delay_penalty_per_day) * effective_delay_days
-            penalty_score += delay_penalty
+            forced_zero_due_to_delay = True
             delay_penalty_comment_index = len(penalty_comments)
             penalty_comments.append("")
-        else:
-            delay_penalty = 0.0
-            delay_penalty_comment_index = None
 
         comment_text = self.comment_text.get("1.0", tk.END).strip()
 
@@ -930,7 +968,8 @@ class EvaluationApp:
             reward_bonus = 0.0
 
         max_total_score = sum(self.section_max_scores.values()) or 0.0
-        effective_cap, display_cap, scaling_factor = self._resolve_scoring_scale(max_total_score)
+        effective_cap, _display_cap, scaling_factor = self._resolve_scoring_scale(max_total_score)
+        result_display_cap = 10.0  # Всегда показываем итог как «… из 10»
 
         if scaling_factor != 1.0:
             section_scores = {
@@ -938,25 +977,42 @@ class EvaluationApp:
             }
             penalty_score *= scaling_factor
             reward_bonus *= scaling_factor
-            delay_penalty *= scaling_factor
         total_score = sum(section_scores.values())
-        raw_total = total_score + penalty_score + reward_bonus
-        if effective_cap > 0:
-            final_score = max(0.0, min(effective_cap, raw_total))
+        limit_to_eight_active = hasattr(self, "limit_to_eight") and self.limit_to_eight.get()
+        double_mode_active = hasattr(self, "double_mode_enabled") and self.double_mode_enabled.get()
+
+        if limit_to_eight_active:
+            base_cap = effective_cap if effective_cap > 0 else 8.0
+            reference_max = max_total_score if max_total_score > 0 else base_cap
+            lost_points = max(0.0, reference_max - total_score)
+            adjusted_total = base_cap - lost_points + penalty_score + reward_bonus
+            final_score = max(0.0, min(base_cap, adjusted_total))
+        elif double_mode_active:
+            base_cap = effective_cap if effective_cap > 0 else 10.0
+            reference_max = max_total_score if max_total_score > 0 else base_cap
+            scaling_ratio = (base_cap / reference_max) if reference_max > 0 else 1.0
+            lost_points = max(0.0, reference_max - total_score)
+            adjusted_total = base_cap - (lost_points * scaling_ratio) + penalty_score + reward_bonus
+            final_score = max(0.0, min(base_cap, adjusted_total))
+        elif effective_cap > 0:
+            base_total = total_score + penalty_score + reward_bonus
+            final_score = max(0.0, min(effective_cap, base_total))
         else:
-            final_score = max(0.0, raw_total)
+            final_score = max(0.0, total_score + penalty_score + reward_bonus)
+
+        if forced_zero_due_to_delay:
+            final_score = 0.0
 
         if delay_penalty_comment_index is not None and 0 <= delay_penalty_comment_index < len(penalty_comments):
             penalty_comments[delay_penalty_comment_index] = (
-                f"Просрочка сдачи задания на {effective_delay_days} дн. "
-                f"({self._format_score(delay_penalty)} балла)"
+                f"Работа сдана с просрочкой на {effective_delay_days} дн. Итоговая оценка 0 согласно правилам."
             )
 
         delay_days = effective_delay_days
 
         if hasattr(self, "status_var"):
             self.status_var.set(
-                f"Рассчитан итог: {self._format_score(final_score)} из {self._format_score(display_cap)}."
+                f"Рассчитан итог: {self._format_score(final_score)} из {self._format_score(result_display_cap)}."
             )
 
         # Генерация изображения с отчётом
@@ -965,7 +1021,7 @@ class EvaluationApp:
             section_comments,
             penalty_comments,
             final_score,
-            display_cap,
+            result_display_cap,
             delay_days,
             comment_text,
             reward_comments,
